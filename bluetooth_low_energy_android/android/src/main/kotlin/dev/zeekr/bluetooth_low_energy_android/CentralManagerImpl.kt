@@ -233,7 +233,7 @@ class CentralManagerImpl(context: Context, binaryMessenger: BinaryMessenger) : B
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    override fun retrieveConnectedPeripherals(): List<MyPeripheralArgs> {
+    override fun retrieveConnectedPeripherals(): List<PeripheralArgs> {
         // The `BluetoothProfile.GATT` and `BluetoothProfile.GATT_SERVER` return same devices.
         val devices = manager.getConnectedDevices(BluetoothProfile.GATT)
         val peripheralsArgs = devices.map { device ->
