@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:clover/clover.dart';
-import 'package:logging/logging.dart';
 
 class CentralManagerViewModel extends ViewModel {
   final CentralManager _manager;
@@ -14,9 +13,9 @@ class CentralManagerViewModel extends ViewModel {
   late final StreamSubscription _discoveredSubscription;
 
   CentralManagerViewModel()
-      : _manager = CentralManager()..logLevel = Level.INFO,
-        _discoveries = [],
-        _discovering = false {
+    : _manager = CentralManager(),
+      _discoveries = [],
+      _discovering = false {
     _stateChangedSubscription = _manager.stateChanged.listen((eventArgs) async {
       if (eventArgs.state == BluetoothLowEnergyState.unauthorized &&
           Platform.isAndroid) {
@@ -44,16 +43,12 @@ class CentralManagerViewModel extends ViewModel {
     await _manager.showAppSettings();
   }
 
-  Future<void> startDiscovery({
-    List<UUID>? serviceUUIDs,
-  }) async {
+  Future<void> startDiscovery({List<UUID>? serviceUUIDs}) async {
     if (_discovering) {
       return;
     }
     _discoveries.clear();
-    await _manager.startDiscovery(
-      serviceUUIDs: serviceUUIDs,
-    );
+    await _manager.startDiscovery(serviceUUIDs: serviceUUIDs);
     _discovering = true;
     notifyListeners();
   }
