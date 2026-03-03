@@ -8,6 +8,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelUuid
 import android.provider.Settings
 import android.util.Log
@@ -32,6 +34,7 @@ class CentralManagerImpl(context: Context, binaryMessenger: BinaryMessenger) : B
     private val mGATTs: MutableMap<String, BluetoothGatt>
     private val mCharacteristics: MutableMap<String, MutableMap<Long, BluetoothGattCharacteristic>>
     private val mDescriptors: MutableMap<String, MutableMap<Long, BluetoothGattDescriptor>>
+    private val mPendingRefreshAddresses: MutableSet<String> = mutableSetOf()
 
     private var mAuthorizeCallback: ((Result<Boolean>) -> Unit)?
     private var mStartDiscoveryCallback: ((Result<Unit>) -> Unit)?
@@ -66,6 +69,10 @@ class CentralManagerImpl(context: Context, binaryMessenger: BinaryMessenger) : B
         mWriteCharacteristicCallbacks = mutableMapOf()
         mReadDescriptorCallbacks = mutableMapOf()
         mWriteDescriptorCallbacks = mutableMapOf()
+    }
+
+    companion object {
+        private const val GATT_REFRESH_DELAY_MS = 500L
     }
 
     private val permissions: Array<String>
@@ -108,6 +115,7 @@ class CentralManagerImpl(context: Context, binaryMessenger: BinaryMessenger) : B
         mWriteCharacteristicCallbacks.clear()
         mReadDescriptorCallbacks.clear()
         mWriteDescriptorCallbacks.clear()
+        mPendingRefreshAddresses.clear()
 
         val enableNotificationValue = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
         val enableIndicationValue = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
@@ -223,12 +231,13 @@ class CentralManagerImpl(context: Context, binaryMessenger: BinaryMessenger) : B
         }
     }
 
-    private fun clearCache(gatt: BluetoothGatt) {
-        try {
+    private fun clearCache(gatt: BluetoothGatt): Boolean {
+        return try {
             val refresh: Method = gatt.javaClass.getMethod("refresh")
-            refresh.invoke(gatt)
+            refresh.invoke(gatt) as? Boolean ?: false
         } catch (e: Exception) {
             Log.e("BLE", "Failed to clear Gatt cache: $e")
+            false
         }
     }
 
@@ -278,11 +287,24 @@ class CentralManagerImpl(context: Context, binaryMessenger: BinaryMessenger) : B
     override fun discoverGATT(addressArgs: String, callback: (Result<List<GATTServiceArgs>>) -> Unit) {
         try {
             val gatt = mGATTs[addressArgs] ?: throw IllegalArgumentException()
-            val discovering = gatt.discoverServices()
-            if (!discovering) {
-                throw IllegalStateException()
+            val hasPendingRefresh = mPendingRefreshAddresses.remove(addressArgs)
+            if (hasPendingRefresh) {
+                mDiscoverServicesCallbacks[addressArgs] = callback
+                Handler(Looper.getMainLooper()).postDelayed({
+                    val gattNow = mGATTs[addressArgs] ?: return@postDelayed // disconnected during delay
+                    val discovering = gattNow.discoverServices()
+                    if (!discovering) {
+                        mDiscoverServicesCallbacks.remove(addressArgs)
+                            ?.invoke(Result.failure(IllegalStateException()))
+                    }
+                }, GATT_REFRESH_DELAY_MS)
+            } else {
+                val discovering = gatt.discoverServices()
+                if (!discovering) {
+                    throw IllegalStateException()
+                }
+                mDiscoverServicesCallbacks[addressArgs] = callback
             }
-            mDiscoverServicesCallbacks[addressArgs] = callback
         } catch (e: Throwable) {
             callback(Result.failure(e))
         }
@@ -440,6 +462,7 @@ class CentralManagerImpl(context: Context, binaryMessenger: BinaryMessenger) : B
             mGATTs.remove(addressArgs)
             mCharacteristics.remove(addressArgs)
             mDescriptors.remove(addressArgs)
+            mPendingRefreshAddresses.remove(addressArgs)
             val error = IllegalStateException("GATT is disconnected with status: $status")
             val requestMtuCallback = mRequestMtuCallbacks.remove(addressArgs)
             if (requestMtuCallback != null) {
@@ -483,7 +506,9 @@ class CentralManagerImpl(context: Context, binaryMessenger: BinaryMessenger) : B
             }
         }
         if (newState == BluetoothProfile.STATE_CONNECTED) {
-            clearCache(gatt)
+            if (clearCache(gatt)) {
+                mPendingRefreshAddresses.add(addressArgs)
+            }
         }
         // check connect callback.
         val connectCallback = mConnectCallbacks.remove(addressArgs)
