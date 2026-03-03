@@ -182,6 +182,7 @@ class CentralManagerImpl(context: Context, binaryMessenger: BinaryMessenger) : B
         try {
             val device = mDevices[addressArgs] ?: throw IllegalArgumentException()
             val autoConnect = false // Add to bluetoothGATTs cache.
+            mGATTs[addressArgs]?.close() // close stale GATT if any
             mGATTs[addressArgs] = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 val transport = BluetoothDevice.TRANSPORT_LE
                 device.connectGatt(context, autoConnect, mBluetoothGattCallback, transport)
@@ -215,7 +216,6 @@ class CentralManagerImpl(context: Context, binaryMessenger: BinaryMessenger) : B
     override fun disconnect(addressArgs: String, callback: (Result<Unit>) -> Unit) {
         try {
             val gatt = mGATTs[addressArgs] ?: throw IllegalArgumentException()
-            clearCache(gatt)
             gatt.disconnect()
             mDisconnectCallbacks[addressArgs] = callback
         } catch (e: Throwable) {
@@ -481,6 +481,9 @@ class CentralManagerImpl(context: Context, binaryMessenger: BinaryMessenger) : B
                     callback(Result.failure(error))
                 }
             }
+        }
+        if (newState == BluetoothProfile.STATE_CONNECTED) {
+            clearCache(gatt)
         }
         // check connect callback.
         val connectCallback = mConnectCallbacks.remove(addressArgs)
